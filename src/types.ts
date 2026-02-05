@@ -29,11 +29,14 @@ export interface GameState {
   longestPossibleLength: number;
   longestPossibleWords: string[];
   longestPossibleCount: number;
+  trackedLongestWords: string[];
+  goalTileSet: Set<string>;
   foundLongestWords: Set<string>;
   showCelebrationModal: boolean;
   celebrationShown: boolean;
   maxInfoRevealed: boolean;
   gameStartTime: number;
+  highlightedGoalTiles: Set<string>;
 }
 
 export interface AdminWords {

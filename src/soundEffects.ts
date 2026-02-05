@@ -207,3 +207,48 @@ export function playFinalSecondTick(isMuted: boolean, secondsRemaining: number) 
   osc.start(ctx.currentTime);
   osc.stop(ctx.currentTime + 0.12);
 }
+
+export function playGameEndSound(isMuted: boolean) {
+  if (isMuted) return;
+
+  const ctx = getAudioContext();
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+
+  osc.frequency.value = 800;
+  osc.type = 'sine';
+
+  gain.gain.setValueAtTime(0.08, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.2);
+
+  osc.start(ctx.currentTime);
+  osc.stop(ctx.currentTime + 0.2);
+}
+
+export function playWinSound(isMuted: boolean) {
+  if (isMuted) return;
+
+  const ctx = getAudioContext();
+  const frequencies = [523.25, 659.25, 783.99];
+
+  frequencies.forEach((freq, index) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.frequency.value = freq;
+    osc.type = 'sine';
+
+    const startTime = ctx.currentTime + (index * 0.08);
+    gain.gain.setValueAtTime(0.1, startTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, startTime + 0.15);
+
+    osc.start(startTime);
+    osc.stop(startTime + 0.15);
+  });
+}

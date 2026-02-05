@@ -4,6 +4,7 @@ interface GridTileProps {
   col: number;
   isSelected: boolean;
   isDisabled: boolean;
+  isPersistentlyHighlighted: boolean;
   onInteract: (row: number, col: number, isInitial: boolean) => void;
 }
 
@@ -13,6 +14,7 @@ export default function GridTile({
   col,
   isSelected,
   isDisabled,
+  isPersistentlyHighlighted,
   onInteract
 }: GridTileProps) {
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -38,6 +40,8 @@ export default function GridTile({
         ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}
         ${isSelected
           ? 'bg-gradient-to-br from-blue-500 to-blue-600 text-white scale-95 shadow-lg'
+          : isPersistentlyHighlighted
+          ? 'bg-gradient-to-br from-amber-600 to-amber-700 text-white hover:scale-105 hover:shadow-xl'
           : 'bg-gradient-to-br from-slate-700 to-slate-600 text-white hover:scale-105 hover:shadow-xl'
         }
       `}

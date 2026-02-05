@@ -24,11 +24,19 @@ class Trie {
 let cachedTrie: Trie | null = null;
 const solverCache: Map<string, SolverResult> = new Map();
 
+export interface Position {
+  row: number;
+  col: number;
+}
+
 export interface SolverResult {
   allWords: string[];
   longestLength: number;
   longestWords: string[];
   longestCount: number;
+  trackedLongestWords: string[];
+  trackedWordPaths: Map<string, Position[]>;
+  goalTileSet: Set<string>;
 }
 
 async function buildTrie(): Promise<Trie> {
@@ -62,10 +70,10 @@ function normalizeGridLetter(letter: string): string {
   return letter.toLowerCase();
 }
 
-function solveBoggle(grid: string[][], minWordLength: number = 3): Set<string> {
+function solveBoggle(grid: string[][], minWordLength: number = 3): Map<string, Position[]> {
   const rows = grid.length;
   const cols = grid[0].length;
-  const foundWords = new Set<string>();
+  const foundWords = new Map<string, Position[]>();
   const trie = cachedTrie!;
 
   function dfs(
@@ -73,7 +81,8 @@ function solveBoggle(grid: string[][], minWordLength: number = 3): Set<string> {
     col: number,
     node: TrieNode,
     path: string,
-    visited: boolean[][]
+    visited: boolean[][],
+    tilePath: Position[]
   ): void {
     if (row < 0 || row >= rows || col < 0 || col >= cols || visited[row][col]) {
       return;
@@ -93,13 +102,16 @@ function solveBoggle(grid: string[][], minWordLength: number = 3): Set<string> {
     }
 
     visited[row][col] = true;
+    const newTilePath = [...tilePath, { row, col }];
 
     if (nextNode.isWord && newPath.length >= minWordLength) {
-      foundWords.add(newPath);
+      if (!foundWords.has(newPath)) {
+        foundWords.set(newPath, newTilePath);
+      }
     }
 
     for (const [dr, dc] of DIRECTIONS) {
-      dfs(row + dr, col + dc, nextNode, newPath, visited);
+      dfs(row + dr, col + dc, nextNode, newPath, visited, newTilePath);
     }
 
     visited[row][col] = false;
@@ -108,7 +120,7 @@ function solveBoggle(grid: string[][], minWordLength: number = 3): Set<string> {
   for (let row = 0; row < rows; row++) {
     for (let col = 0; col < cols; col++) {
       const visited: boolean[][] = Array(rows).fill(null).map(() => Array(cols).fill(false));
-      dfs(row, col, trie.root, '', visited);
+      dfs(row, col, trie.root, '', visited, []);
     }
   }
 
@@ -126,19 +138,38 @@ export async function solveBoardForSeed(
 
   await buildTrie();
 
-  const foundWordsSet = solveBoggle(grid, minWordLength);
-  const allWords = Array.from(foundWordsSet).sort();
+  const foundWordsMap = solveBoggle(grid, minWordLength);
+  const allWords = Array.from(foundWordsMap.keys()).sort();
 
   const longestLength = allWords.reduce((max, word) => Math.max(max, word.length), 0);
   const longestWords = allWords
     .filter(word => word.length === longestLength)
     .sort();
 
+  const trackedLongestWords = longestWords.length <= 3
+    ? longestWords
+    : longestWords.slice(0, 3);
+
+  const trackedWordPaths = new Map<string, Position[]>();
+  const goalTileSet = new Set<string>();
+
+  for (const word of trackedLongestWords) {
+    const path = foundWordsMap.get(word)!;
+    trackedWordPaths.set(word, path);
+
+    for (const pos of path) {
+      goalTileSet.add(`${pos.row},${pos.col}`);
+    }
+  }
+
   const result: SolverResult = {
     allWords,
     longestLength,
     longestWords,
-    longestCount: longestWords.length
+    longestCount: longestWords.length,
+    trackedLongestWords,
+    trackedWordPaths,
+    goalTileSet
   };
 
   solverCache.set(seed, result);

@@ -15,8 +15,9 @@ import { loadUnifiedDictionary, getDictionaryStats } from '../unifiedDictionary'
 import { verifySolverAccuracy } from '../boggleSolver';
 import GridTile from './GridTile';
 import AdminPanel from './AdminPanel';
+import Confetti from './Confetti';
 import { Clock, Volume2, VolumeX, Shield, Trophy, Copy, Dices, Link2, Info } from 'lucide-react';
-import { playClickSound, playSuccessSound, playInvalidWordSound, playDuplicateWordSound, playCountdownTickSound, playCountdownStartSound, playFinalSecondTick } from '../soundEffects';
+import { playClickSound, playSuccessSound, playInvalidWordSound, playDuplicateWordSound, playCountdownTickSound, playCountdownStartSound, playFinalSecondTick, playGameEndSound, playWinSound } from '../soundEffects';
 
 const ADMIN_PASSPHRASE = 'wordhunt2024';
 
@@ -87,11 +88,14 @@ export default function WordGame() {
     longestPossibleLength: 0,
     longestPossibleWords: [],
     longestPossibleCount: 0,
+    trackedLongestWords: [],
+    goalTileSet: new Set(),
     foundLongestWords: new Set(),
     showCelebrationModal: false,
     celebrationShown: false,
     maxInfoRevealed: false,
-    gameStartTime: 0
+    gameStartTime: 0,
+    highlightedGoalTiles: new Set()
   }));
 
   const [adminWords, setAdminWords] = useState<AdminWords>(() => {
@@ -161,7 +165,7 @@ export default function WordGame() {
 
           if (isUnlimitedMode) {
             const elapsedSeconds = Math.floor((Date.now() - prev.gameStartTime) / 1000);
-            const shouldReveal = !prev.maxInfoRevealed && elapsedSeconds >= 300;
+            const shouldReveal = !prev.maxInfoRevealed && elapsedSeconds >= 60;
 
             if (shouldReveal) {
               return {
@@ -182,6 +186,7 @@ export default function WordGame() {
               if (timerIntervalRef.current) {
                 clearInterval(timerIntervalRef.current);
               }
+              playGameEndSound(prev.isMuted);
               return {
                 ...prev,
                 timeRemaining: 0,
@@ -191,18 +196,6 @@ export default function WordGame() {
               };
             }
 
-            const totalDuration = prev.selectedDuration || 0;
-            const elapsedSeconds = totalDuration - newTime;
-            const revealThreshold = totalDuration * 0.2;
-            const shouldReveal = !prev.maxInfoRevealed && elapsedSeconds >= revealThreshold;
-
-            if (shouldReveal) {
-              return {
-                ...prev,
-                timeRemaining: newTime,
-                maxInfoRevealed: true
-              };
-            }
             return { ...prev, timeRemaining: newTime };
           }
         });
@@ -228,15 +221,25 @@ export default function WordGame() {
       return () => clearTimeout(timer);
     } else if (gameState.countdownValue === 0) {
       playCountdownStartSound(gameState.isMuted);
-      setGameState(prev => ({
-        ...prev,
-        countdownValue: null,
-        isGameStarted: true,
-        timeRemaining: prev.selectedDuration || 0,
-        gameStartTime: Date.now()
-      }));
+      setGameState(prev => {
+        const isUnlimitedMode = prev.selectedDuration === null;
+        return {
+          ...prev,
+          countdownValue: null,
+          isGameStarted: true,
+          timeRemaining: prev.selectedDuration || 0,
+          gameStartTime: Date.now(),
+          maxInfoRevealed: !isUnlimitedMode
+        };
+      });
     }
   }, [gameState.countdownValue, gameState.isMuted]);
+
+  useEffect(() => {
+    if (gameState.showCelebrationModal) {
+      playWinSound(gameState.isMuted);
+    }
+  }, [gameState.showCelebrationModal, gameState.isMuted]);
 
   const isWordValid = (word: string): boolean => {
     if (word.length < 3) return false;
@@ -402,14 +405,22 @@ export default function WordGame() {
     const newBestWord = wordLength >= gameState.bestLength ? word : gameState.bestWord;
 
     const newFoundLongestWords = new Set(gameState.foundLongestWords);
-    if (gameState.longestPossibleWords.includes(word)) {
+    if (gameState.trackedLongestWords.includes(word)) {
       newFoundLongestWords.add(word);
     }
 
+    const newHighlightedGoalTiles = new Set(gameState.highlightedGoalTiles);
+    gameState.selectedPath.forEach(pos => {
+      const tileKey = `${pos.row},${pos.col}`;
+      if (gameState.goalTileSet.has(tileKey)) {
+        newHighlightedGoalTiles.add(tileKey);
+      }
+    });
+
     const shouldShowCelebration =
       !gameState.celebrationShown &&
-      newFoundLongestWords.size === gameState.longestPossibleCount &&
-      gameState.longestPossibleCount > 0;
+      newFoundLongestWords.size === gameState.trackedLongestWords.length &&
+      gameState.trackedLongestWords.length > 0;
 
     showFeedback(`Found: ${word.toUpperCase()}`, 'success');
 
@@ -422,7 +433,8 @@ export default function WordGame() {
       currentWord: '',
       foundLongestWords: newFoundLongestWords,
       showCelebrationModal: shouldShowCelebration,
-      celebrationShown: shouldShowCelebration || prev.celebrationShown
+      celebrationShown: shouldShowCelebration || prev.celebrationShown,
+      highlightedGoalTiles: newHighlightedGoalTiles
     }));
   };
 
@@ -474,9 +486,12 @@ export default function WordGame() {
         longestPossibleLength: solverResult.longestLength,
         longestPossibleWords: solverResult.longestWords,
         longestPossibleCount: solverResult.longestCount,
+        trackedLongestWords: solverResult.trackedLongestWords,
+        goalTileSet: solverResult.goalTileSet,
         foundLongestWords: new Set(),
         celebrationShown: false,
-        maxInfoRevealed: false
+        maxInfoRevealed: !isUnlimitedMode,
+        highlightedGoalTiles: new Set()
       }));
     } else {
       setGameState(prev => ({
@@ -489,10 +504,13 @@ export default function WordGame() {
         longestPossibleLength: solverResult.longestLength,
         longestPossibleWords: solverResult.longestWords,
         longestPossibleCount: solverResult.longestCount,
+        trackedLongestWords: solverResult.trackedLongestWords,
+        goalTileSet: solverResult.goalTileSet,
         foundLongestWords: new Set(),
         celebrationShown: false,
-        maxInfoRevealed: false,
-        gameStartTime: Date.now()
+        maxInfoRevealed: !isUnlimitedMode,
+        gameStartTime: Date.now(),
+        highlightedGoalTiles: new Set()
       }));
     }
 
@@ -529,11 +547,14 @@ export default function WordGame() {
       longestPossibleLength: 0,
       longestPossibleWords: [],
       longestPossibleCount: 0,
+      trackedLongestWords: [],
+      goalTileSet: new Set(),
       foundLongestWords: new Set(),
       showCelebrationModal: false,
       celebrationShown: false,
       maxInfoRevealed: false,
-      gameStartTime: 0
+      gameStartTime: 0,
+      highlightedGoalTiles: new Set()
     }));
   };
 
@@ -570,11 +591,14 @@ export default function WordGame() {
       longestPossibleLength: solverResult.longestLength,
       longestPossibleWords: solverResult.longestWords,
       longestPossibleCount: solverResult.longestCount,
+      trackedLongestWords: solverResult.trackedLongestWords,
+      goalTileSet: solverResult.goalTileSet,
       foundLongestWords: new Set(),
       showCelebrationModal: false,
       celebrationShown: false,
-      maxInfoRevealed: false,
-      gameStartTime: Date.now()
+      maxInfoRevealed: !isUnlimitedMode,
+      gameStartTime: Date.now(),
+      highlightedGoalTiles: new Set()
     }));
   };
 
@@ -583,26 +607,30 @@ export default function WordGame() {
       clearInterval(timerIntervalRef.current);
     }
 
-    setGameState(prev => ({
-      ...prev,
-      grid: prev.savedGrid ? prev.savedGrid.map(row => [...row]) : prev.grid,
-      selectedPath: [],
-      currentWord: '',
-      foundWords: new Map(),
-      bestWord: '',
-      bestLength: 0,
-      isGameStarted: true,
-      isGameEnded: false,
-      timeRemaining: prev.selectedDuration || 0,
-      feedback: { message: '', type: '' },
-      showSeedInfo: false,
-      countdownValue: null,
-      foundLongestWords: new Set(),
-      showCelebrationModal: false,
-      celebrationShown: false,
-      maxInfoRevealed: false,
-      gameStartTime: Date.now()
-    }));
+    setGameState(prev => {
+      const isUnlimitedMode = prev.selectedDuration === null;
+      return {
+        ...prev,
+        grid: prev.savedGrid ? prev.savedGrid.map(row => [...row]) : prev.grid,
+        selectedPath: [],
+        currentWord: '',
+        foundWords: new Map(),
+        bestWord: '',
+        bestLength: 0,
+        isGameStarted: true,
+        isGameEnded: false,
+        timeRemaining: prev.selectedDuration || 0,
+        feedback: { message: '', type: '' },
+        showSeedInfo: false,
+        countdownValue: null,
+        foundLongestWords: new Set(),
+        showCelebrationModal: false,
+        celebrationShown: false,
+        maxInfoRevealed: !isUnlimitedMode,
+        gameStartTime: Date.now(),
+        highlightedGoalTiles: new Set()
+      };
+    });
   };
 
   const handleCelebrationContinue = () => {
@@ -829,11 +857,16 @@ export default function WordGame() {
                   {gameState.maxInfoRevealed ? (
                     <>
                       <div className="text-lg font-bold text-yellow-400">
-                        {gameState.foundLongestWords.size}/{gameState.longestPossibleCount}
+                        {gameState.foundLongestWords.size}/{gameState.trackedLongestWords.length}
                       </div>
                       <div className="text-xs text-slate-400 mt-1">
                         Max length: {gameState.longestPossibleLength}
                       </div>
+                      {gameState.longestPossibleCount > 3 && (
+                        <div className="text-xs text-slate-500 mt-1">
+                          Tracking 3 of {gameState.longestPossibleCount}
+                        </div>
+                      )}
                     </>
                   ) : (
                     <div className="text-sm text-slate-500">Hidden</div>
@@ -891,6 +924,7 @@ export default function WordGame() {
                       col={colIndex}
                       isSelected={isPositionInPath({ row: rowIndex, col: colIndex }, gameState.selectedPath)}
                       isDisabled={gameState.isGameEnded}
+                      isPersistentlyHighlighted={gameState.highlightedGoalTiles.has(`${rowIndex},${colIndex}`)}
                       onInteract={handleTileInteraction}
                     />
                   ))
@@ -963,7 +997,7 @@ export default function WordGame() {
           )}
         </div>
 
-        {gameState.isGameEnded && gameState.foundWords.size > 0 && (
+        {gameState.isGameEnded && (
           <div className="mt-6 bg-slate-800/50 backdrop-blur-sm rounded-2xl p-6 shadow-2xl border border-slate-700/50">
             <h2 className="text-xl font-bold text-white mb-4">Game Results</h2>
             <div className="space-y-3 mb-4">
@@ -989,6 +1023,11 @@ export default function WordGame() {
                     <span className="text-slate-400 mb-2">
                       Longest Possible Words ({gameState.longestPossibleCount}):
                     </span>
+                    {gameState.longestPossibleCount > 3 && (
+                      <div className="text-xs text-amber-400 mb-2 bg-amber-900/20 p-2 rounded">
+                        Tile highlighting tracked {gameState.trackedLongestWords.length} of {gameState.longestPossibleCount} words: {gameState.trackedLongestWords.join(', ').toUpperCase()}
+                      </div>
+                    )}
                     <LongestWordsDisplay
                       words={gameState.longestPossibleWords}
                       foundWords={gameState.foundLongestWords}
@@ -1039,16 +1078,20 @@ export default function WordGame() {
             <div className="border-t border-slate-700 pt-4">
               <h3 className="text-sm font-semibold text-slate-400 mb-2">All Words:</h3>
               <div className="flex flex-wrap gap-2 max-h-48 overflow-y-auto">
-                {Array.from(gameState.foundWords.keys())
-                  .sort((a, b) => b.length - a.length || a.localeCompare(b))
-                  .map(word => (
-                    <span
-                      key={word}
-                      className="px-3 py-1 bg-slate-700 text-white rounded-lg text-sm font-medium uppercase"
-                    >
-                      {word}
-                    </span>
-                  ))}
+                {gameState.foundWords.size === 0 ? (
+                  <div className="text-sm text-slate-500">No words found</div>
+                ) : (
+                  Array.from(gameState.foundWords.keys())
+                    .sort((a, b) => b.length - a.length || a.localeCompare(b))
+                    .map(word => (
+                      <span
+                        key={word}
+                        className="px-3 py-1 bg-slate-700 text-white rounded-lg text-sm font-medium uppercase"
+                      >
+                        {word}
+                      </span>
+                    ))
+                )}
               </div>
             </div>
           </div>
@@ -1066,7 +1109,9 @@ export default function WordGame() {
       </div>
 
       {gameState.showCelebrationModal && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+        <>
+          <Confetti />
+          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
           <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl p-8 max-w-md w-full shadow-2xl border-2 border-yellow-500/50">
             <div className="text-center mb-6">
               <div className="text-6xl mb-4">🎉</div>
@@ -1103,6 +1148,7 @@ export default function WordGame() {
             </div>
           </div>
         </div>
+        </>
       )}
 
       {showAdminPanel && (
