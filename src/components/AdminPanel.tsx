@@ -70,8 +70,8 @@ export default function AdminPanel({ adminWords, onUpdateAdminWords, onClose }: 
       try {
         const data = JSON.parse(event.target?.result as string);
         const updatedWords = {
-          additions: new Set(data.additions || []),
-          blocklist: new Set(data.blocklist || [])
+          additions: new Set<string>(data.additions || []),
+          blocklist: new Set<string>(data.blocklist || [])
         };
         onUpdateAdminWords(updatedWords);
       } catch (error) {

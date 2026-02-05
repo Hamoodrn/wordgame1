@@ -185,3 +185,25 @@ export function playCountdownStartSound(isMuted: boolean) {
   osc2.stop(ctx.currentTime + 0.3);
   osc3.stop(ctx.currentTime + 0.3);
 }
+
+export function playFinalSecondTick(isMuted: boolean, secondsRemaining: number) {
+  if (isMuted) return;
+
+  const ctx = getAudioContext();
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+
+  const baseFreq = 600;
+  const pitchIncrease = (6 - secondsRemaining) * 100;
+  osc.frequency.value = baseFreq + pitchIncrease;
+  osc.type = 'sine';
+
+  gain.gain.setValueAtTime(0.15, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.12);
+
+  osc.start(ctx.currentTime);
+  osc.stop(ctx.currentTime + 0.12);
+}

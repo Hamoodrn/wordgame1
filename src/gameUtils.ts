@@ -1,6 +1,6 @@
 import { Position } from './types';
 import { SeededRandom } from './seededRandom';
-import { isWordSpelledCorrectly } from './hunspellDictionary';
+import { isValidWord } from './unifiedDictionary';
 import { solveBoardForSeed, SolverResult } from './boggleSolver';
 
 const letterFrequencies: { [key: string]: number } = {
@@ -22,7 +22,6 @@ Object.entries(letterFrequencies).forEach(([letter, freq]) => {
 const VOWELS = new Set(['A', 'E', 'I', 'O', 'U']);
 const MIN_VOWELS = 4;
 const MAX_VOWELS = 7;
-const MIN_LONGEST_LENGTH = 6;
 const MAX_GENERATION_ATTEMPTS = 200;
 
 function countVowels(grid: string[][]): number {
@@ -57,7 +56,10 @@ function generateCandidateGrid(seed: string, attemptIndex: number): string[][] {
   return grid;
 }
 
-export async function generateValidatedGrid(seed: string): Promise<{ grid: string[][], solverResult: SolverResult }> {
+export async function generateValidatedGrid(
+  seed: string,
+  minLongestLength: number = 5
+): Promise<{ grid: string[][], solverResult: SolverResult }> {
   let bestGrid: string[][] | null = null;
   let bestResult: SolverResult | null = null;
   let bestLength = 0;
@@ -72,7 +74,7 @@ export async function generateValidatedGrid(seed: string): Promise<{ grid: strin
 
     const solverResult = await solveBoardForSeed(candidateGrid, `${seed}-${attempt}`);
 
-    if (solverResult.longestLength >= MIN_LONGEST_LENGTH) {
+    if (solverResult.longestLength >= minLongestLength) {
       return { grid: candidateGrid, solverResult };
     }
 
@@ -181,7 +183,7 @@ export function getTopWords(foundWords: Map<string, number>, limit: number = 3):
 }
 
 export function validateWithInflections(word: string): boolean {
-  return isWordSpelledCorrectly(word);
+  return isValidWord(word);
 }
 
 export function getThemeColors(duration: number | null): { bg: string; accent: string } {

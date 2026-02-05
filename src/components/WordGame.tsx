@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Position, GameState, TimerDuration, AdminWords, SelectionMode } from '../types';
+import { Position, GameState, TimerDuration, AdminWords } from '../types';
 import {
   generateGrid,
   generateValidatedGrid,
@@ -8,17 +8,15 @@ import {
   getWordFromPath,
   getTileFromCoordinates,
   formatTime,
-  getTopWords,
-  validateWithInflections,
-  getThemeColors
+  validateWithInflections
 } from '../gameUtils';
 import { generateSeedCode, getSeedFromUrl, seedToUrl } from '../seededRandom';
-import { loadDictionary } from '../hunspellDictionary';
-import { solveBoardForSeed } from '../boggleSolver';
+import { loadUnifiedDictionary, getDictionaryStats } from '../unifiedDictionary';
+import { verifySolverAccuracy } from '../boggleSolver';
 import GridTile from './GridTile';
 import AdminPanel from './AdminPanel';
 import { Clock, Volume2, VolumeX, Shield, Trophy, Copy, Dices, Link2, Info } from 'lucide-react';
-import { playClickSound, playSuccessSound, playInvalidWordSound, playDuplicateWordSound, playCountdownTickSound, playCountdownStartSound } from '../soundEffects';
+import { playClickSound, playSuccessSound, playInvalidWordSound, playDuplicateWordSound, playCountdownTickSound, playCountdownStartSound, playFinalSecondTick } from '../soundEffects';
 
 const ADMIN_PASSPHRASE = 'wordhunt2024';
 
@@ -79,7 +77,6 @@ export default function WordGame() {
     isGameEnded: false,
     selectedDuration: undefined,
     timeRemaining: 0,
-    selectionMode: 'hold',
     feedback: { message: '', type: '' },
     isMuted: false,
     savedGrid: null,
@@ -115,6 +112,10 @@ export default function WordGame() {
 
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [debugMode] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('debug') === '1';
+  });
   const feedbackTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -140,21 +141,12 @@ export default function WordGame() {
   }, []);
 
   useEffect(() => {
-    loadDictionary().then(() => {
-      console.log('Hunspell dictionary loaded');
+    loadUnifiedDictionary().then(() => {
+      const stats = getDictionaryStats();
+      console.log(`✓ Unified dictionary loaded: ${stats.wordCount} words`);
     }).catch(err => {
-      console.error('Failed to load Hunspell dictionary:', err);
+      console.error('Failed to load unified dictionary:', err);
     });
-  }, []);
-
-  useEffect(() => {
-    const testWords = ['siren', 'sirens', 'sirened', 'sirening'];
-    console.log('=== Dictionary Validation Check ===');
-    testWords.forEach(word => {
-      const isValid = isWordValid(word);
-      console.log(`"${word}": ${isValid ? '✓ valid' : '✗ invalid'}`);
-    });
-    console.log('===================================');
   }, []);
 
   useEffect(() => {
@@ -181,6 +173,11 @@ export default function WordGame() {
             return { ...prev, timeRemaining: elapsedSeconds };
           } else {
             const newTime = prev.timeRemaining - 1;
+
+            if (newTime <= 5 && newTime > 0) {
+              playFinalSecondTick(prev.isMuted, newTime);
+            }
+
             if (newTime <= 0) {
               if (timerIntervalRef.current) {
                 clearInterval(timerIntervalRef.current);
@@ -292,88 +289,44 @@ export default function WordGame() {
           feedback: { message: '', type: '' }
         }));
       }
-    }
 
-    if (gameState.selectionMode === 'click') {
-      if (isDragging) {
-        if (isPositionInPath(pos, gameState.selectedPath)) {
-          return;
+      playClickSound(gameState.isMuted, 0);
+      setIsDragging(true);
+      hoverStateRef.current = { pos, timestamp: Date.now() };
+      setGameState(prev => {
+        const newPath = [pos];
+        const newWord = getWordFromPath(prev.grid, newPath);
+        return {
+          ...prev,
+          selectedPath: newPath,
+          currentWord: newWord
+        };
+      });
+    } else if (isDragging) {
+      setGameState(prev => {
+        if (isPositionInPath(pos, prev.selectedPath)) {
+          return prev;
         }
 
-        if (gameState.selectedPath.length === 0) {
-          return;
+        if (prev.selectedPath.length === 0) {
+          return prev;
         }
 
-        const lastPos = gameState.selectedPath[gameState.selectedPath.length - 1];
+        const lastPos = prev.selectedPath[prev.selectedPath.length - 1];
         if (!areAdjacent(lastPos, pos)) {
-          return;
+          return prev;
         }
 
-        playClickSound(gameState.isMuted, gameState.selectedPath.length);
-        setGameState(prev => {
-          const newPath = [...prev.selectedPath, pos];
-          const newWord = getWordFromPath(prev.grid, newPath);
+        playClickSound(prev.isMuted, prev.selectedPath.length);
+        const newPath = [...prev.selectedPath, pos];
+        const newWord = getWordFromPath(prev.grid, newPath);
 
-          return {
-            ...prev,
-            selectedPath: newPath,
-            currentWord: newWord
-          };
-        });
-      } else if (isInitial) {
-        playClickSound(gameState.isMuted, 0);
-        setIsDragging(true);
-        hoverStateRef.current = { pos, timestamp: Date.now() };
-        setGameState(prev => {
-          const newPath = [pos];
-          const newWord = getWordFromPath(prev.grid, newPath);
-          return {
-            ...prev,
-            selectedPath: newPath,
-            currentWord: newWord
-          };
-        });
-      }
-    } else {
-      if (isInitial) {
-        playClickSound(gameState.isMuted, 0);
-        setIsDragging(true);
-        hoverStateRef.current = { pos, timestamp: Date.now() };
-        setGameState(prev => {
-          const newPath = [pos];
-          const newWord = getWordFromPath(prev.grid, newPath);
-          return {
-            ...prev,
-            selectedPath: newPath,
-            currentWord: newWord
-          };
-        });
-      } else if (isDragging) {
-        setGameState(prev => {
-          if (isPositionInPath(pos, prev.selectedPath)) {
-            return prev;
-          }
-
-          if (prev.selectedPath.length === 0) {
-            return prev;
-          }
-
-          const lastPos = prev.selectedPath[prev.selectedPath.length - 1];
-          if (!areAdjacent(lastPos, pos)) {
-            return prev;
-          }
-
-          playClickSound(prev.isMuted, prev.selectedPath.length);
-          const newPath = [...prev.selectedPath, pos];
-          const newWord = getWordFromPath(prev.grid, newPath);
-
-          return {
-            ...prev,
-            selectedPath: newPath,
-            currentWord: newWord
-          };
-        });
-      }
+        return {
+          ...prev,
+          selectedPath: newPath,
+          currentWord: newWord
+        };
+      });
     }
   };
 
@@ -491,7 +444,25 @@ export default function WordGame() {
     if (gameState.selectedDuration === undefined) return;
 
     const seed = seedInput.trim().toLowerCase() || generateSeedCode();
-    const { grid: newGrid, solverResult } = await generateValidatedGrid(seed);
+    const isUnlimitedMode = gameState.selectedDuration === null;
+    const minLength = isUnlimitedMode ? 6 : 5;
+
+    const { grid: newGrid, solverResult } = await generateValidatedGrid(seed, minLength);
+
+    if (debugMode) {
+      console.log('=== DEBUG MODE ===');
+      console.log(`Seed: ${seed}`);
+      console.log(`Total words found: ${solverResult.allWords.length}`);
+      console.log(`Longest length: ${solverResult.longestLength}`);
+      console.log(`Longest words (${solverResult.longestCount}):`, solverResult.longestWords);
+
+      const verification = await verifySolverAccuracy(newGrid, seed);
+      console.log(`Solver accuracy: ${verification.isAccurate ? '✓' : '✗'}`);
+      if (verification.issues.length > 0) {
+        console.log('Issues:', verification.issues);
+      }
+      console.log('==================');
+    }
 
     if (gameState.countdownEnabled) {
       setGameState(prev => ({
@@ -548,7 +519,6 @@ export default function WordGame() {
       isGameEnded: false,
       selectedDuration: undefined,
       timeRemaining: 0,
-      selectionMode: prev.selectionMode,
       feedback: { message: '', type: '' },
       isMuted: prev.isMuted,
       savedGrid: null,
@@ -573,7 +543,9 @@ export default function WordGame() {
     }
 
     const newSeed = generateSeedCode();
-    const { grid: newGrid, solverResult } = await generateValidatedGrid(newSeed);
+    const isUnlimitedMode = gameState.selectedDuration === null;
+    const minLength = isUnlimitedMode ? 6 : 5;
+    const { grid: newGrid, solverResult } = await generateValidatedGrid(newSeed, minLength);
 
     setSeedInput(newSeed);
 
@@ -588,7 +560,6 @@ export default function WordGame() {
       isGameEnded: false,
       selectedDuration: prev.selectedDuration,
       timeRemaining: prev.selectedDuration || 0,
-      selectionMode: prev.selectionMode,
       feedback: { message: '', type: '' },
       isMuted: prev.isMuted,
       savedGrid: newGrid.map(row => [...row]),
@@ -714,13 +685,6 @@ export default function WordGame() {
     setGameState(prev => ({ ...prev, isMuted: !prev.isMuted }));
   };
 
-  const toggleSelectionMode = () => {
-    setGameState(prev => ({
-      ...prev,
-      selectionMode: prev.selectionMode === 'hold' ? 'click' : 'hold'
-    }));
-  };
-
   const handleAdminClick = () => {
     if (isAdmin) {
       setShowAdminPanel(true);
@@ -736,16 +700,24 @@ export default function WordGame() {
     }
   };
 
-  const topWords = getTopWords(gameState.foundWords, 3);
-  const themeColors = gameState.selectedDuration ? getThemeColors(gameState.selectedDuration) : { bg: 'from-slate-900 via-slate-800 to-slate-900', accent: 'blue' };
+  const themeColors = { bg: 'from-slate-900 via-slate-800 to-slate-900', accent: 'blue' };
 
   return (
     <div className={`min-h-screen bg-gradient-to-br ${themeColors.bg} flex items-center justify-center p-4`}>
       <div className="w-full max-w-md">
         <div className="text-center mb-6">
-          <h1 className="text-4xl font-bold text-white mb-2">Word Hunt</h1>
-          <p className="text-slate-400 text-sm">Drag across letters to form words</p>
+          <h1 className="text-4xl font-bold text-white mb-2">Boggle</h1>
+          <p className="text-slate-400 text-sm">Drag across letters to find the longest words</p>
         </div>
+
+        {debugMode && gameState.longestPossibleLength > 0 && (
+          <div className="bg-yellow-900/30 border border-yellow-600/50 rounded-xl p-4 mb-4 text-yellow-200 text-sm">
+            <div className="font-bold mb-2">DEBUG MODE</div>
+            <div>Total solvable words: {gameState.longestPossibleWords.length > 0 ? '...' : 'calculating...'}</div>
+            <div>Max length: {gameState.longestPossibleLength}</div>
+            <div>Max words ({gameState.longestPossibleCount}): {gameState.longestPossibleWords.join(', ')}</div>
+          </div>
+        )}
 
         <div className="bg-slate-800/50 backdrop-blur-sm rounded-2xl p-6 shadow-2xl border border-slate-700/50">
           {!gameState.isGameStarted && gameState.countdownValue === null ? (
@@ -920,7 +892,6 @@ export default function WordGame() {
                       isSelected={isPositionInPath({ row: rowIndex, col: colIndex }, gameState.selectedPath)}
                       isDisabled={gameState.isGameEnded}
                       onInteract={handleTileInteraction}
-                      selectionMode={gameState.selectionMode}
                     />
                   ))
                 )}
@@ -946,17 +917,14 @@ export default function WordGame() {
 
                 <div className="flex gap-2">
                   <button
-                    onClick={toggleSelectionMode}
-                    className="flex-1 bg-slate-700 hover:bg-slate-600 text-white text-sm py-2 px-4 rounded-xl transition-colors"
-                  >
-                    Mode: {gameState.selectionMode === 'hold' ? 'Click & Hold' : 'Click Twice'}
-                  </button>
-                  <button
                     onClick={() => setGameState(prev => ({ ...prev, showSeedInfo: !prev.showSeedInfo }))}
-                    className="bg-slate-700 hover:bg-slate-600 text-white p-2 rounded-xl transition-colors"
+                    className="flex-1 bg-slate-700 hover:bg-slate-600 text-white text-sm py-2 px-4 rounded-xl transition-colors"
                     title="Show seed"
                   >
-                    <Info className="w-5 h-5" />
+                    <div className="flex items-center justify-center gap-2">
+                      <Info className="w-4 h-4" />
+                      <span>Seed Info</span>
+                    </div>
                   </button>
                   <button
                     onClick={toggleMute}

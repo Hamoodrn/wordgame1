@@ -3,7 +3,6 @@ export interface Position {
   col: number;
 }
 
-export type SelectionMode = 'hold' | 'click';
 export type TimerDuration = 60 | 300 | 600 | 1800 | 3600 | 86400 | null;
 
 export interface GameState {
@@ -17,7 +16,6 @@ export interface GameState {
   isGameEnded: boolean;
   selectedDuration: TimerDuration | undefined;
   timeRemaining: number;
-  selectionMode: SelectionMode;
   feedback: {
     message: string;
     type: 'success' | 'error' | 'info' | '';
